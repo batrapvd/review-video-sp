@@ -215,22 +215,36 @@ class VideoProcessor:
                 max_retries = 3
                 for retry in range(max_retries):
                     try:
+                        # Use headers to bypass Shopee restrictions
                         result = subprocess.run([
                             'curl', '-L', '-o', str(output_path), url,
                             '--max-time', '300',
-                            '--connect-timeout', '30'
+                            '--connect-timeout', '30',
+                            '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            '-H', 'Referer: https://shopee.vn/',
+                            '-H', 'Accept: video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5',
+                            '-H', 'Accept-Language: vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+                            '-w', '%{http_code}',
+                            '--compressed'
                         ], capture_output=True, text=True)
+
+                        http_code = result.stdout.strip() if result.stdout else '000'
+                        logger.info(f"Video {i+1} download HTTP status: {http_code}")
 
                         # Check if file was created and has content
                         if not output_path.exists():
-                            raise Exception("File was not created")
+                            raise Exception(f"File was not created (HTTP {http_code})")
 
                         file_size = output_path.stat().st_size
                         if file_size == 0:
-                            raise Exception("Downloaded file is empty")
+                            raise Exception(f"Downloaded file is empty (HTTP {http_code})")
 
                         if file_size < 1024:  # Less than 1KB is suspicious
-                            logger.warning(f"Video {i+1} file size is very small: {file_size} bytes")
+                            logger.warning(f"Video {i+1} file size is very small: {file_size} bytes (HTTP {http_code})")
+                            # Read first bytes to check if it's an error page
+                            with open(output_path, 'rb') as f:
+                                first_bytes = f.read(100)
+                                logger.warning(f"First bytes: {first_bytes[:50]}")
 
                         # Validate with ffprobe
                         validate_result = subprocess.run([
@@ -242,7 +256,7 @@ class VideoProcessor:
 
                         if validate_result.returncode != 0:
                             logger.error(f"Video {i+1} validation failed: {validate_result.stderr}")
-                            raise Exception(f"Invalid video file: {validate_result.stderr}")
+                            raise Exception(f"Invalid video file (HTTP {http_code}): {validate_result.stderr}")
 
                         logger.info(f"Downloaded video {i+1}/{len(videos)} ({file_size} bytes)")
                         break
@@ -256,6 +270,7 @@ class VideoProcessor:
                             continue
                         else:
                             logger.error(f"Failed to download video {i+1} after {max_retries} attempts: {download_error}")
+                            logger.error(f"URL: {url}")
                             return False
 
             return True
