@@ -568,24 +568,33 @@ class VideoProcessor:
             dimensions = result.stdout.strip()
             logger.info(f"Video dimensions: {dimensions}")
 
-            # Determine font size based on text length
+            # Determine font size and wrap text if needed
             text_length = len(overlay_text)
 
             if text_length > 70:
-                fontsize = 28
-            elif text_length > 50:
-                fontsize = 32
+                if text_length > 105:
+                    # Split into 3 lines
+                    fontsize = 24
+                    display_text = self._wrap_text(overlay_text, 3)
+                else:
+                    # Split into 2 lines
+                    fontsize = 28
+                    display_text = self._wrap_text(overlay_text, 2)
             else:
-                fontsize = 38
+                # Single line
+                display_text = overlay_text
+                fontsize = 38 if text_length <= 50 else 32
+
+            logger.info(f"Text overlay: {text_length} chars, fontsize={fontsize}")
 
             # Escape text for ffmpeg
-            escaped_text = overlay_text.replace("'", "'\\''").replace(":", "\\:")
+            escaped_text = display_text.replace("'", "'\\''").replace(":", "\\:")
 
-            # Add text overlay
+            # Add text overlay with line spacing
             subprocess.run([
                 'ffmpeg',
                 '-i', str(self.output_dir / 'merged_with_audio.mp4'),
-                '-vf', f"drawtext=text='{escaped_text}':fontsize={fontsize}:fontcolor=white:x=(w-text_w)/2:y=60:box=1:boxcolor=black@0.85:boxborderw=25",
+                '-vf', f"drawtext=text='{escaped_text}':fontsize={fontsize}:fontcolor=white:x=(w-text_w)/2:y=60:box=1:boxcolor=black@0.85:boxborderw=25:line_spacing=12",
                 '-c:a', 'copy',
                 '-y', str(self.output_dir / 'final_merged_video.mp4')
             ], check=True, capture_output=True)
@@ -598,7 +607,7 @@ class VideoProcessor:
             return False
 
     def _wrap_text(self, text: str, lines: int) -> str:
-        """Wrap text into multiple lines"""
+        """Wrap text into multiple lines for better display"""
         length = len(text)
         chunk_size = length // lines
 
