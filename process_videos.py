@@ -187,9 +187,8 @@ class VideoProcessor:
             if not self.add_audio():
                 return None
 
-            # Add text overlay
-            product_name = video_data.get('productInfo', {}).get('name', 'Product')
-            if not self.add_text_overlay(product_name):
+            # Add text overlay (using AI-generated overlay text)
+            if not self.add_text_overlay(video_data):
                 return None
 
             # Upload to R2
@@ -442,10 +441,22 @@ class VideoProcessor:
             logger.error(f"Error adding audio: {e}")
             return False
 
-    def add_text_overlay(self, product_name: str) -> bool:
-        """Add text overlay to video"""
+    def add_text_overlay(self, video_data: Dict) -> bool:
+        """Add AI-generated text overlay to video"""
         try:
             logger.info("Adding text overlay...")
+
+            # Read AI-generated overlay text from file
+            overlay_file = self.scripts_dir / 'text_overlay.txt'
+
+            if overlay_file.exists():
+                with open(overlay_file, 'r', encoding='utf-8') as f:
+                    overlay_text = f.read().strip()
+                logger.info(f"Using AI-generated overlay: {overlay_text}")
+            else:
+                # Fallback to product name if overlay file doesn't exist
+                overlay_text = video_data.get('productInfo', {}).get('name', 'Product')
+                logger.warning(f"Overlay file not found, using product name: {overlay_text}")
 
             # Get video dimensions
             result = subprocess.run([
@@ -459,31 +470,24 @@ class VideoProcessor:
             dimensions = result.stdout.strip()
             logger.info(f"Video dimensions: {dimensions}")
 
-            # Determine font size and text wrapping
-            name_length = len(product_name)
+            # Determine font size based on text length
+            text_length = len(overlay_text)
 
-            if name_length > 70:
-                if name_length > 105:
-                    # Split into 3 lines
-                    fontsize = 24
-                    display_text = self._wrap_text(product_name, 3)
-                else:
-                    # Split into 2 lines
-                    fontsize = 28
-                    display_text = self._wrap_text(product_name, 2)
+            if text_length > 70:
+                fontsize = 28
+            elif text_length > 50:
+                fontsize = 32
             else:
-                # Single line
-                display_text = product_name
-                fontsize = 38 if name_length <= 50 else 32
+                fontsize = 38
 
             # Escape text for ffmpeg
-            escaped_text = display_text.replace("'", "'\\''").replace(":", "\\:")
+            escaped_text = overlay_text.replace("'", "'\\''").replace(":", "\\:")
 
             # Add text overlay
             subprocess.run([
                 'ffmpeg',
                 '-i', str(self.output_dir / 'merged_with_audio.mp4'),
-                '-vf', f"drawtext=text='{escaped_text}':fontsize={fontsize}:fontcolor=white:x=(w-text_w)/2:y=60:box=1:boxcolor=black@0.85:boxborderw=25:line_spacing=12",
+                '-vf', f"drawtext=text='{escaped_text}':fontsize={fontsize}:fontcolor=white:x=(w-text_w)/2:y=60:box=1:boxcolor=black@0.85:boxborderw=25",
                 '-c:a', 'copy',
                 '-y', str(self.output_dir / 'final_merged_video.mp4')
             ], check=True, capture_output=True)
