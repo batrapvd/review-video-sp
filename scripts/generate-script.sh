@@ -41,7 +41,7 @@ Yêu cầu:
 2. Giọng điệu hấp dẫn, thu hút khách hàng
 3. Nhấn mạnh các tính năng nổi bật từ tên sản phẩm
 4. Không nói giá chi tiết kiểu '269.000 đồng' mà chỉ nói '269k' hoặc '429k'
-5. Câu cuối cùng PHẢI là: 'Mọi người mua sản phẩm thì ấn vào link ở bình luận nha.'
+5. Câu cuối cùng PHẢI là: 'Mọi người mua sản phẩm thì ấn vào link ở giỏ hàng nha.'
 6. Viết bằng tiếng Việt tự nhiên, dễ nghe
 7. Không dùng ký tự đặc biệt phức tạp
 8. Đếm chính xác số ký tự để đảm bảo đúng ${TARGET_SCRIPT_LENGTH} ký tự
