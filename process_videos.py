@@ -82,7 +82,7 @@ class VideoProcessor:
         logger.info("Cleaned up working directories")
 
     def get_pending_products(self) -> List[Dict]:
-        """Fetch products from database where merge_status=FALSE"""
+        """Fetch products from database where merge_status=FALSE and crawl_status=TRUE"""
         try:
             conn = psycopg2.connect(self.db_url)
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -90,7 +90,7 @@ class VideoProcessor:
             query = """
                 SELECT id, video_data
                 FROM public.products
-                WHERE merge_status = FALSE
+                WHERE merge_status = FALSE AND crawl_status = TRUE
                 ORDER BY id
             """
 
@@ -315,15 +315,60 @@ class VideoProcessor:
             logger.error(f"Error merging videos: {e}")
             return False
 
+    def get_video_duration(self, video_path: Path) -> float:
+        """Get video duration in seconds"""
+        try:
+            result = subprocess.run([
+                'ffprobe', '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                str(video_path)
+            ], capture_output=True, text=True, check=True)
+
+            duration = float(result.stdout.strip())
+            return duration
+
+        except Exception as e:
+            logger.error(f"Error getting video duration: {e}")
+            return 0.0
+
+    def calculate_target_script_length(self, video_duration: float, chars_per_second: float = 15.0) -> int:
+        """
+        Calculate target script length based on video duration and speech speed
+
+        Args:
+            video_duration: Video duration in seconds
+            chars_per_second: Average Vietnamese speech speed (default: 15 chars/sec)
+
+        Returns:
+            Target script length in characters
+        """
+        target_length = int(video_duration * chars_per_second)
+        logger.info(f"Video duration: {video_duration:.2f}s, Target script length: {target_length} characters")
+        return target_length
+
     def generate_script(self, video_data_file: Path) -> bool:
-        """Generate AI script using existing bash script"""
+        """Generate AI script using existing bash script with calculated target length"""
         try:
             logger.info("Generating AI script...")
+
+            # Get merged video duration
+            merged_video = self.output_dir / 'merged_temp.mp4'
+            video_duration = self.get_video_duration(merged_video)
+
+            if video_duration == 0:
+                logger.error("Failed to get video duration")
+                return False
+
+            # Calculate target script length
+            target_length = self.calculate_target_script_length(video_duration)
 
             env = os.environ.copy()
             env['HUGGINGFACE_ENDPOINT'] = self.huggingface_endpoint
             env['HUGGINGFACE_MODEL'] = self.huggingface_model
             env['HUGGINGFACE_API_KEY'] = self.huggingface_api_key
+            env['TARGET_SCRIPT_LENGTH'] = str(target_length)
+            env['VIDEO_DURATION'] = str(video_duration)
 
             script_path = self.scripts_dir / 'generate-script.sh'
 
