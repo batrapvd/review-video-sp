@@ -1,0 +1,39 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+SECRETS.md
+secrets.txt
+credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+
+# Working directories
+videos/
+output/
+*.mp4
+*.mp3
+*.wav
+*.aac
+
+# Temporary files
+video-data.json
+scripts/generated_script.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
