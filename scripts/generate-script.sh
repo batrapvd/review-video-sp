@@ -29,13 +29,14 @@ echo "Video Duration: ${VIDEO_DURATION}s"
 echo "Target Script Length: ${TARGET_SCRIPT_LENGTH} characters"
 
 # Create prompt for AI
-PROMPT="Hãy viết một đoạn giới thiệu sản phẩm cho video TikTok/Reels với các thông tin sau:
+PROMPT="Hãy tạo 2 phần nội dung cho video TikTok/Reels về sản phẩm sau:
 
 Tên sản phẩm: $PRODUCT_NAME
 Giá hiện tại: $PRICE_FORMATTED
 Giá gốc: $ORIGINAL_PRICE_FORMATTED
 Giảm giá: $DISCOUNT
 
+PHẦN 1 - SCRIPT VOICE-OVER:
 Yêu cầu:
 1. QUAN TRỌNG: Script phải có CHÍNH XÁC ${TARGET_SCRIPT_LENGTH} ký tự (bao gồm dấu câu và khoảng trắng) để khớp với video dài ${VIDEO_DURATION} giây. Đây là yêu cầu BẮT BUỘC để script nói liền mạch từ đầu đến cuối video.
 2. Giọng điệu hấp dẫn, thu hút khách hàng
@@ -46,7 +47,15 @@ Yêu cầu:
 7. Không dùng ký tự đặc biệt phức tạp
 8. Đếm chính xác số ký tự để đảm bảo đúng ${TARGET_SCRIPT_LENGTH} ký tự
 
-Hãy viết đoạn giới thiệu với CHÍNH XÁC ${TARGET_SCRIPT_LENGTH} ký tự:"
+PHẦN 2 - TEXT OVERLAY:
+Tạo một dòng text ngắn gọn, xúc tích (tối đa 70 ký tự) để hiển thị trên video, tóm tắt điểm nổi bật nhất của sản phẩm.
+Ví dụ: 'Áo thun nam cao cấp - Giảm 37%' hoặc 'Giày sneaker đế êm - Chỉ 269k'
+
+Hãy trả về kết quả dưới dạng JSON với format sau (KHÔNG thêm markdown code block):
+{
+  \"script\": \"<script voice-over với ${TARGET_SCRIPT_LENGTH} ký tự>\",
+  \"overlay\": \"<text overlay ngắn gọn>\"
+}"
 
 # Call HuggingFace API
 RESPONSE=$(curl -s --location "$HUGGINGFACE_ENDPOINT" \
@@ -70,7 +79,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Extract the generated text
+# Extract the generated text (JSON response from AI)
 GENERATED_TEXT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content' 2>/dev/null)
 
 if [ -z "$GENERATED_TEXT" ] || [ "$GENERATED_TEXT" = "null" ]; then
@@ -80,11 +89,45 @@ if [ -z "$GENERATED_TEXT" ] || [ "$GENERATED_TEXT" = "null" ]; then
 fi
 
 echo ""
-echo "=== Generated Script ==="
+echo "=== AI Response ==="
 echo "$GENERATED_TEXT"
 echo ""
 
-# Save to file
-echo "$GENERATED_TEXT" > scripts/generated_script.txt
+# Parse JSON response to extract script and overlay
+SCRIPT_TEXT=$(echo "$GENERATED_TEXT" | jq -r '.script' 2>/dev/null)
+OVERLAY_TEXT=$(echo "$GENERATED_TEXT" | jq -r '.overlay' 2>/dev/null)
+
+# Fallback: if JSON parsing fails, try to extract from markdown code block
+if [ -z "$SCRIPT_TEXT" ] || [ "$SCRIPT_TEXT" = "null" ]; then
+    # Try to extract JSON from markdown code block
+    JSON_CONTENT=$(echo "$GENERATED_TEXT" | sed -n '/^```json/,/^```/p' | sed '1d;$d')
+    if [ -n "$JSON_CONTENT" ]; then
+        SCRIPT_TEXT=$(echo "$JSON_CONTENT" | jq -r '.script' 2>/dev/null)
+        OVERLAY_TEXT=$(echo "$JSON_CONTENT" | jq -r '.overlay' 2>/dev/null)
+    fi
+fi
+
+# Final validation
+if [ -z "$SCRIPT_TEXT" ] || [ "$SCRIPT_TEXT" = "null" ]; then
+    echo "Error: Could not parse script from AI response"
+    exit 1
+fi
+
+if [ -z "$OVERLAY_TEXT" ] || [ "$OVERLAY_TEXT" = "null" ]; then
+    echo "Warning: Could not parse overlay text, using product name as fallback"
+    OVERLAY_TEXT="$PRODUCT_NAME"
+fi
+
+echo "=== Generated Script (${#SCRIPT_TEXT} characters) ==="
+echo "$SCRIPT_TEXT"
+echo ""
+echo "=== Generated Overlay ==="
+echo "$OVERLAY_TEXT"
+echo ""
+
+# Save to separate files
+echo "$SCRIPT_TEXT" > scripts/generated_script.txt
+echo "$OVERLAY_TEXT" > scripts/text_overlay.txt
 
 echo "Script saved to scripts/generated_script.txt"
+echo "Overlay saved to scripts/text_overlay.txt"
