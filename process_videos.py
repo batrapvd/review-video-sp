@@ -215,20 +215,47 @@ class VideoProcessor:
                 max_retries = 3
                 for retry in range(max_retries):
                     try:
-                        subprocess.run([
+                        result = subprocess.run([
                             'curl', '-L', '-o', str(output_path), url,
                             '--max-time', '300',
                             '--connect-timeout', '30'
-                        ], check=True, capture_output=True)
+                        ], capture_output=True, text=True)
 
-                        logger.info(f"Downloaded video {i+1}/{len(videos)}")
+                        # Check if file was created and has content
+                        if not output_path.exists():
+                            raise Exception("File was not created")
+
+                        file_size = output_path.stat().st_size
+                        if file_size == 0:
+                            raise Exception("Downloaded file is empty")
+
+                        if file_size < 1024:  # Less than 1KB is suspicious
+                            logger.warning(f"Video {i+1} file size is very small: {file_size} bytes")
+
+                        # Validate with ffprobe
+                        validate_result = subprocess.run([
+                            'ffprobe', '-v', 'error',
+                            '-show_entries', 'format=duration',
+                            '-of', 'default=noprint_wrappers=1:nokey=1',
+                            str(output_path)
+                        ], capture_output=True, text=True)
+
+                        if validate_result.returncode != 0:
+                            logger.error(f"Video {i+1} validation failed: {validate_result.stderr}")
+                            raise Exception(f"Invalid video file: {validate_result.stderr}")
+
+                        logger.info(f"Downloaded video {i+1}/{len(videos)} ({file_size} bytes)")
                         break
-                    except subprocess.CalledProcessError:
+
+                    except Exception as download_error:
                         if retry < max_retries - 1:
-                            logger.warning(f"Download failed, retrying... ({retry+1}/{max_retries})")
+                            logger.warning(f"Download failed ({download_error}), retrying... ({retry+1}/{max_retries})")
+                            # Clean up failed download
+                            if output_path.exists():
+                                output_path.unlink()
                             continue
                         else:
-                            logger.error(f"Failed to download video {i+1} after {max_retries} attempts")
+                            logger.error(f"Failed to download video {i+1} after {max_retries} attempts: {download_error}")
                             return False
 
             return True
@@ -247,29 +274,46 @@ class VideoProcessor:
                 input_path = self.videos_dir / f'video_{i}.mp4'
                 output_path = self.videos_dir / f'trimmed_{i}.mp4'
 
-                # Get duration
-                result = subprocess.run([
-                    'ffprobe', '-v', 'error',
-                    '-show_entries', 'format=duration',
-                    '-of', 'default=noprint_wrappers=1:nokey=1',
-                    str(input_path)
-                ], capture_output=True, text=True, check=True)
+                # Check if input file exists
+                if not input_path.exists():
+                    logger.error(f"Video {i+1} file not found: {input_path}")
+                    return False
 
-                duration = float(result.stdout.strip())
+                # Get duration
+                try:
+                    result = subprocess.run([
+                        'ffprobe', '-v', 'error',
+                        '-show_entries', 'format=duration',
+                        '-of', 'default=noprint_wrappers=1:nokey=1',
+                        str(input_path)
+                    ], capture_output=True, text=True, check=True)
+
+                    duration = float(result.stdout.strip())
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"ffprobe failed for video {i+1}: {e.stderr}")
+                    return False
+                except ValueError as e:
+                    logger.error(f"Invalid duration for video {i+1}: {result.stdout}")
+                    return False
+
                 new_duration = duration - 4
 
                 if new_duration > 0:
                     # Trim video
-                    subprocess.run([
-                        'ffmpeg', '-i', str(input_path),
-                        '-ss', '2', '-t', str(new_duration),
-                        '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
-                        '-c:a', 'aac', '-b:a', '128k', '-ar', '48000',
-                        '-r', '30',
-                        '-y', str(output_path)
-                    ], check=True, capture_output=True)
+                    try:
+                        trim_result = subprocess.run([
+                            'ffmpeg', '-i', str(input_path),
+                            '-ss', '2', '-t', str(new_duration),
+                            '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
+                            '-c:a', 'aac', '-b:a', '128k', '-ar', '48000',
+                            '-r', '30',
+                            '-y', str(output_path)
+                        ], capture_output=True, text=True, check=True)
 
-                    logger.info(f"Trimmed video {i+1}: {duration:.2f}s -> {new_duration:.2f}s")
+                        logger.info(f"Trimmed video {i+1}: {duration:.2f}s -> {new_duration:.2f}s")
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"ffmpeg trim failed for video {i+1}: {e.stderr}")
+                        return False
                 else:
                     # Video too short, keep original
                     shutil.copy(input_path, output_path)
