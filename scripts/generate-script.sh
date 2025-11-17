@@ -25,6 +25,8 @@ echo "Product: $PRODUCT_NAME"
 echo "Price: $PRICE -> $PRICE_FORMATTED"
 echo "Original Price: $ORIGINAL_PRICE -> $ORIGINAL_PRICE_FORMATTED"
 echo "Discount: $DISCOUNT"
+echo "Video Duration: ${VIDEO_DURATION}s"
+echo "Target Script Length: ${TARGET_SCRIPT_LENGTH} characters"
 
 # Create prompt for AI
 PROMPT="Hãy viết một đoạn giới thiệu sản phẩm cho video TikTok/Reels với các thông tin sau:
@@ -35,15 +37,16 @@ Giá gốc: $ORIGINAL_PRICE_FORMATTED
 Giảm giá: $DISCOUNT
 
 Yêu cầu:
-1. Tối đa 450 từ
+1. QUAN TRỌNG: Script phải có CHÍNH XÁC ${TARGET_SCRIPT_LENGTH} ký tự (bao gồm dấu câu và khoảng trắng) để khớp với video dài ${VIDEO_DURATION} giây. Đây là yêu cầu BẮT BUỘC để script nói liền mạch từ đầu đến cuối video.
 2. Giọng điệu hấp dẫn, thu hút khách hàng
 3. Nhấn mạnh các tính năng nổi bật từ tên sản phẩm
 4. Không nói giá chi tiết kiểu '269.000 đồng' mà chỉ nói '269k' hoặc '429k'
 5. Câu cuối cùng PHẢI là: 'Mọi người mua sản phẩm thì ấn vào link ở bình luận nha.'
 6. Viết bằng tiếng Việt tự nhiên, dễ nghe
 7. Không dùng ký tự đặc biệt phức tạp
+8. Đếm chính xác số ký tự để đảm bảo đúng ${TARGET_SCRIPT_LENGTH} ký tự
 
-Hãy viết đoạn giới thiệu:"
+Hãy viết đoạn giới thiệu với CHÍNH XÁC ${TARGET_SCRIPT_LENGTH} ký tự:"
 
 # Call HuggingFace API
 RESPONSE=$(curl -s --location "$HUGGINGFACE_ENDPOINT" \
