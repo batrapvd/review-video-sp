@@ -15,7 +15,7 @@ from botocore.client import Config
 from datetime import datetime
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import tempfile
 import shutil
 
@@ -133,6 +133,30 @@ class VideoProcessor:
             logger.error(f"Failed to update database: {e}")
             raise
 
+    def update_crawl_status(self, product_id: int, status: bool = False):
+        """Update crawl_status (set to FALSE when videos are invalid/expired)"""
+        try:
+            conn = psycopg2.connect(self.db_url)
+            cursor = conn.cursor()
+
+            query = """
+                UPDATE public.products
+                SET crawl_status = %s
+                WHERE id = %s
+            """
+
+            cursor.execute(query, (status, product_id))
+            conn.commit()
+
+            cursor.close()
+            conn.close()
+
+            logger.info(f"Updated product {product_id} crawl_status to {status}")
+
+        except Exception as e:
+            logger.error(f"Failed to update crawl_status: {e}")
+            raise
+
     def process_product(self, product_id: int, video_data: Dict) -> Optional[str]:
         """
         Process a single product: download videos, merge, add audio/text, upload to R2
@@ -164,7 +188,15 @@ class VideoProcessor:
                 json.dump(video_data, f, ensure_ascii=False, indent=2)
 
             # Download videos
-            if not self.download_videos(video_data):
+            download_success, error_code = self.download_videos(video_data)
+            if not download_success:
+                # If videos are expired/not found (404), update crawl_status to FALSE
+                if error_code == '404':
+                    logger.warning(f"Product {product_id}: Videos not found (404) - updating crawl_status to FALSE for re-crawling")
+                    try:
+                        self.update_crawl_status(product_id, False)
+                    except Exception as e:
+                        logger.error(f"Failed to update crawl_status: {e}")
                 return None
 
             # Process videos (trim)
@@ -201,8 +233,12 @@ class VideoProcessor:
             logger.error(f"Error processing product {product_id}: {e}")
             return None
 
-    def download_videos(self, video_data: Dict) -> bool:
-        """Download all videos from URLs"""
+    def download_videos(self, video_data: Dict) -> Tuple[bool, Optional[str]]:
+        """
+        Download all videos from URLs
+        Returns: (success: bool, error_code: Optional[str])
+        error_code can be '404', '403', 'invalid', etc.
+        """
         try:
             videos = video_data.get('videos', [])
             logger.info(f"Downloading {len(videos)} videos...")
@@ -213,6 +249,7 @@ class VideoProcessor:
 
                 # Download with retry
                 max_retries = 3
+                last_http_code = None
                 for retry in range(max_retries):
                     try:
                         # Use headers to bypass Shopee restrictions
@@ -229,6 +266,7 @@ class VideoProcessor:
                         ], capture_output=True, text=True)
 
                         http_code = result.stdout.strip() if result.stdout else '000'
+                        last_http_code = http_code
                         logger.info(f"Video {i+1} download HTTP status: {http_code}")
 
                         # Check if file was created and has content
@@ -271,13 +309,14 @@ class VideoProcessor:
                         else:
                             logger.error(f"Failed to download video {i+1} after {max_retries} attempts: {download_error}")
                             logger.error(f"URL: {url}")
-                            return False
+                            # Return error code for proper handling
+                            return (False, last_http_code)
 
-            return True
+            return (True, None)
 
         except Exception as e:
             logger.error(f"Error downloading videos: {e}")
-            return False
+            return (False, None)
 
     def process_videos(self, video_data: Dict) -> bool:
         """Trim 2 seconds from start and end of each video"""
@@ -529,24 +568,33 @@ class VideoProcessor:
             dimensions = result.stdout.strip()
             logger.info(f"Video dimensions: {dimensions}")
 
-            # Determine font size based on text length
+            # Determine font size and wrap text if needed
             text_length = len(overlay_text)
 
             if text_length > 70:
-                fontsize = 28
-            elif text_length > 50:
-                fontsize = 32
+                if text_length > 105:
+                    # Split into 3 lines
+                    fontsize = 24
+                    display_text = self._wrap_text(overlay_text, 3)
+                else:
+                    # Split into 2 lines
+                    fontsize = 28
+                    display_text = self._wrap_text(overlay_text, 2)
             else:
-                fontsize = 38
+                # Single line
+                display_text = overlay_text
+                fontsize = 38 if text_length <= 50 else 32
+
+            logger.info(f"Text overlay: {text_length} chars, fontsize={fontsize}")
 
             # Escape text for ffmpeg
-            escaped_text = overlay_text.replace("'", "'\\''").replace(":", "\\:")
+            escaped_text = display_text.replace("'", "'\\''").replace(":", "\\:")
 
-            # Add text overlay
+            # Add text overlay with line spacing
             subprocess.run([
                 'ffmpeg',
                 '-i', str(self.output_dir / 'merged_with_audio.mp4'),
-                '-vf', f"drawtext=text='{escaped_text}':fontsize={fontsize}:fontcolor=white:x=(w-text_w)/2:y=60:box=1:boxcolor=black@0.85:boxborderw=25",
+                '-vf', f"drawtext=text='{escaped_text}':fontsize={fontsize}:fontcolor=white:x=(w-text_w)/2:y=60:box=1:boxcolor=black@0.85:boxborderw=25:line_spacing=12",
                 '-c:a', 'copy',
                 '-y', str(self.output_dir / 'final_merged_video.mp4')
             ], check=True, capture_output=True)
@@ -559,7 +607,7 @@ class VideoProcessor:
             return False
 
     def _wrap_text(self, text: str, lines: int) -> str:
-        """Wrap text into multiple lines"""
+        """Wrap text into multiple lines for better display"""
         length = len(text)
         chunk_size = length // lines
 
